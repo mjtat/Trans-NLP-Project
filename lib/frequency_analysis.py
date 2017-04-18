@@ -5,6 +5,7 @@ Created on Tue Apr 18 11:30:40 2017
 
 @author: michelle
 """
+
 import pandas as pd
 import nltk
 import string
@@ -21,47 +22,73 @@ class frequency_analysis(object):
     def __init__(self, dataframe):
         self.dataframe = dataframe
         
-    def decode(self, dataframe,column_title):
-        dataframe[column_title] = dataframe[column_title].astype(str)
+    def decode(self, column_title):
+        dataframe = self.dataframe
+        # dataframe[column_title] = dataframe[column_title].astype(str)
         dataframe[column_title] = dataframe[column_title].str.lower()
-        dataframe[column_title] = dataframe[column_title].str.decode('utf-8', errors='strict')
+        dataframe[column_title] = dataframe[column_title].str.decode('UTF-8', errors='ignore')
         return dataframe
     
     # Takes an additional list of stop words to remove.    
     def defineStopwords(self, words = None):
         stop_words = stopwords.words('english')
         etc_stop = ['.', ',', '?', '!', '\'',  ':', '\"', '{', '}', ';', '%', '[',  ']', '(', ')', '-', '\'s', '\'ve', '...', '\'ll', '`', '``', '"n\'t"', '"\'m"', "''", '--', '&']
-        stop_words = stop_words + etc_stop + self.words
+        if words is not None: 
+            stop_words = stop_words + etc_stop + words
+        
+        else:
+            stop_words = stop_words + etc_stop
+            
         return stop_words
     
-    def tokenize(self, strip_punct = True, regexp = True, treebank = False, lemmatize = True):
+    def tokenize_text(self, df_column, words = None):
         
+        df = self.dataframe
+        df = self.decode(df_column)
+        corpus = df[df_column].tolist()
+        
+    
         cleaned_corpus = []
-                   
+          
+#        if words is not None:
+#            stopwords = self.defineStopwords(words)
+        
+        stopwords = self.defineStopwords()
+        
         for post in corpus:
+            
             temp = post.lower()
             
             temp = post.encode('ascii', 'ignore')
             
-            if self.strip_punct == True:
-                temp = temp.translate(None, string.punctuation)
+            temp = temp.translate(None, string.punctuation)
             
-            if self.regexp == True and self.treebank == False:
-                tokenizer = RegexpTokenizer(r'\w+')
+            tokenizer = RegexpTokenizer(r'\w+')
                 
-            elif self.treebank == True and self.regexp == False:
-                tokenizer = TreebankWordTokenizer()
+#            tokenizer = TreebankWordTokenizer()
                 
+    #        temp = tokenizer.tokenize(temp)
+            
+            stopped_tokens = [i for i in temp if not i in stopwords]
+            
+            lemmatized_tokens = [nltk.WordNetLemmatizer().lemmatize(i) for i in stopped_tokens]
                 
-            temp = tokenizer.tokenize(temp)
-            
-            stopped_tokens = [i for i in temp if not i in defineStopwords()]
-            
-            if self.lemmatize == True:
-                lemmatized_tokens = [nltk.WordNetLemmatizer().lemmatize(i) for i in stopped_tokens]
-            
             cleaned_corpus.append(lemmatized_tokens)
-            print '\n Successfully cleaned and tokenized abstracts.'
+            
+        print '\n Successfully cleaned and tokenized abstracts.'
             
         return cleaned_corpus
-        
+  
+
+if __name__ == '__main__':
+    import os
+    # Set working directory.
+    os.chdir('/home/michelle/Documents/Blogs/Trans NLP/data')
+    
+    ask = pd.read_csv('allask.csv')      
+
+    frequency = frequency_analysis(ask)
+    
+    #frequency.decode('selftext')
+
+    x = frequency.tokenize_text('selftext')
