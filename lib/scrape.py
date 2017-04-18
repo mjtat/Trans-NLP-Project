@@ -6,14 +6,12 @@ Created on Mon Apr 17 20:30:06 2017
 @author: michelle
 """
 import pandas as pd
-import praw
 import nltk
 import string
 import matplotlib.pyplot as plt
 from nltk.corpus import stopwords
 from nltk import FreqDist
 from nltk.tokenize import RegexpTokenizer
-from nltk.tokenize import StanfordTokenizer
 from nltk.tokenize import TreebankWordTokenizer
 from nltk.tokenize import word_tokenize
 from string import punctuation
@@ -78,36 +76,23 @@ class FreqAnalysis(object):
         df = pd.DataFrame({'words': words, 'frequency': freq})
         
         return df
+    
+    def plot_frequencies(self, df):
+        fig, ax = plt.subplots()
+        df.iloc[:,0:2].plot(kind = 'barh', figsize=(24,24), ax=ax, width = .8, fontsize = 20)
+        ax.set_title("Word Pair Frequency", fontsize = 24)
+        ax.set_yticklabels(df['words'])
+        ax.set_xlabel("Frequency",fontsize = 24)
+        ax.set_ylabel("Word Pairs", fontsize = 24)
+        fig.tight_layout()
+        plt.savefig('barplot_2.png', dpi = 300)
             
 if __name__ == '__main__':
     data = pd.read_csv('allask.csv')
-    
     test = FreqAnalysis(data)
     x = test.clean('selftext')
-
     y = test.count_ngram(x, 2, 50)    
-   
-    word_list = []
-    for i in data:
-        word_list += i
-        
-    fdist = FreqDist(list(nltk.ngrams(word_list,2)))
-    
-    words = []
-    freq = []
-    
-    for word, frequency in fdist.most_common(75):
-        words.append(word)
-        freq.append(frequency)
-    
-    df = pd.DataFrame({'words': words, 'frequency': freq})
+    test.plot_frequencies(y)
     
     
-    fig, ax = plt.subplots()
-    df.iloc[:,0:2].plot(kind = 'barh', figsize=(24,24), ax=ax, width = .8, fontsize = 20)
-    ax.set_title("Word Pair Frequency", fontsize = 24)
-    ax.set_yticklabels(df['words'])
-    ax.set_xlabel("Frequency",fontsize = 24)
-    ax.set_ylabel("Word Pairs", fontsize = 24)
-    fig.tight_layout()
-    plt.savefig('barplot_2.png', dpi = 300)
+
