@@ -12,10 +12,13 @@ import string
 import matplotlib.pyplot as plt
 from nltk.corpus import stopwords
 from nltk import FreqDist
+from nltk import word_tokenize
 from nltk.tokenize import RegexpTokenizer
 from nltk.tokenize import TreebankWordTokenizer
 from nltk.tokenize import sent_tokenize
 from string import punctuation
+from gensim.models import Word2Vec, Phrases
+from gensim import corpora
 
 class TextAnalysis(object):
     
@@ -47,33 +50,18 @@ class TextAnalysis(object):
         df = self.dataframe
         df = self.decode(df_column)
         corpus = df[df_column].tolist()
-        
-    
+
         cleaned_corpus = []
-          
-#        if words is not None:
-#            stopwords = self.defineStopwords(words)
-        
+               
         stopwords = self.defineStopwords()
         
         for post in corpus:
-            
             temp = post.lower()
-            
             temp = post.encode('ascii', 'ignore')
-            
             temp = temp.translate(None, string.punctuation)
-            
             tokenizer = RegexpTokenizer(r'\w+')
-                
-#            tokenizer = TreebankWordTokenizer()
-                
-    #        temp = tokenizer.tokenize(temp)
-            
             stopped_tokens = [i for i in temp if not i in stopwords]
-            
             lemmatized_tokens = [nltk.WordNetLemmatizer().lemmatize(i) for i in stopped_tokens]
-                
             cleaned_corpus.append(lemmatized_tokens)
             
         print '\n Successfully cleaned and tokenized abstracts.'
@@ -102,10 +90,18 @@ class TextAnalysis(object):
         
         for sentence_list in cleaned_corpus:
             for sentence in sentence_list:
-                temp = word_tokenize(sentence)
-                tokenized_sents.append(temp)   
+                
+                    temp = word_tokenize(sentence)
+                    tokenized_sents.append(temp)
             
         return tokenized_sents
+    
+    def createBOW(self, corpus):
+        dictionary = corpora.Dictionary(corpus)
+        BOW = [dictionary.doc2bow(text) for text in corpus]
+        tfidf = models.TfidfModel(BOW)
+        corpus_tfidf = tfidf[BOW]
+        return dictionary, corpus_tfidf
     
 
 if __name__ == '__main__':
@@ -114,18 +110,18 @@ if __name__ == '__main__':
     os.chdir('/home/michelle/Documents/Blogs/Trans NLP/data')
     
     ask = pd.read_csv('allask.csv')      
+    cats = pd.read_csv('cats.csv')
 
-    frequency = TextAnalysis(ask)
+    trans = TextAnalysis(ask)
+    cats = TextAnalysis(cats)
     
     #frequency.decode('selftext')
-    x = frequency.sentence_tokens('selftext')
-    x = frequency.tokenize_text('selftext')
+    trans_tokens = trans.sentence_tokens('selftext')
+    cat_tokens = cats.sentence_tokens('selftext')
     
-    tokenized_sents = []
-    for sentence_list in x:
-        for sentence in sentence_list:
-            temp = word_tokenize(sentence)
-            tokenized_sents.append(temp)
-            
-    model = Word2Vec(x, size=100, window=10, min_count=5, workers=4)
-    model.most_similar(positive = ['tired', 'sleeping'], topn=20)
+    #bigram_transformer = Phrases(trans_tokens)
+    model_trans = Word2Vec(trans_tokens, size=200, window=10, min_count=10, workers=4, sg = 1)
+    model_cats = Word2Vec(cat_tokens, size=100, window=10, min_count=5, workers=4, sg = 1)
+    
+    model_trans.most_similar(positive = ['anxiety'], topn=20)
+    model_cats.most_similar(positive = ['happy'], topn = 20)
