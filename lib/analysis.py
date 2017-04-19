@@ -61,6 +61,7 @@ class TextAnalysis(object):
             temp = post.encode('ascii', 'ignore')
             temp = temp.translate(None, string.punctuation)
             tokenizer = RegexpTokenizer(r'\w+')
+            temp = tokenizer.tokenize(temp)
             stopped_tokens = [i for i in temp if not i in stopwords]
             lemmatized_tokens = [nltk.WordNetLemmatizer().lemmatize(i) for i in stopped_tokens]
             cleaned_corpus.append(lemmatized_tokens)
@@ -114,9 +115,19 @@ if __name__ == '__main__':
     f = open('trans_tokens.pck1', 'wb')
     pickle.dump(trans_tokens, f)
     f.close()
-
-    trans_dict, trans_tfidf = trans.createBOW(trans_tokens)
     
+    count = 0
+    for post in trans_tokens:
+        if 'gender' and 'dysophoria' and 'therapist' in post:
+            count += 1
+        else:
+            count += 0
+    count = float(count)
+    count
+    
+    trans_dict, trans_tfidf = trans.createBOW(trans_tokens)
+    lsi = models.LsiModel(trans_tfidf, id2word=trans_dict, num_topics=10)
+    corpus_lsi = lsi[trans_tfidf]    
     #frequency.decode('selftext')
     trans_tokens = trans.sentence_tokens('selftext')
     cat_tokens = cats.sentence_tokens('selftext')
