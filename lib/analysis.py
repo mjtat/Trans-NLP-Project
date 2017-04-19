@@ -10,6 +10,7 @@ import pandas as pd
 import nltk
 import string
 import matplotlib.pyplot as plt
+import pickle
 from nltk.corpus import stopwords
 from nltk import FreqDist
 from nltk import word_tokenize
@@ -18,7 +19,7 @@ from nltk.tokenize import TreebankWordTokenizer
 from nltk.tokenize import sent_tokenize
 from string import punctuation
 from gensim.models import Word2Vec, Phrases
-from gensim import corpora
+from gensim import corpora, models
 
 class TextAnalysis(object):
     
@@ -45,7 +46,7 @@ class TextAnalysis(object):
             
         return stop_words
     
-    def tokenize_text(self, df_column, words = None):
+    def wordTokens(self, df_column, words = None):
         
         df = self.dataframe
         df = self.decode(df_column)
@@ -68,7 +69,7 @@ class TextAnalysis(object):
             
         return cleaned_corpus
     
-    def sentence_tokens(self, df_column):
+    def sentenceTokens(self, df_column):
         df = self.dataframe
         df = self.decode(df_column)
         corpus = df[df_column].tolist()
@@ -77,20 +78,13 @@ class TextAnalysis(object):
         cleaned_corpus = []
                 
         for post in corpus:
-            
             temp = post.lower()
-            
             temp = post.encode('ascii', 'ignore')
-            
             temp = sent_tokenize(temp) # I am happy, I am sad 
-                      
             cleaned_corpus.append(temp)
-            
-        
         
         for sentence_list in cleaned_corpus:
-            for sentence in sentence_list:
-                
+            for sentence in sentence_list: 
                     temp = word_tokenize(sentence)
                     tokenized_sents.append(temp)
             
@@ -114,6 +108,14 @@ if __name__ == '__main__':
 
     trans = TextAnalysis(ask)
     cats = TextAnalysis(cats)
+
+    trans_tokens = trans.wordTokens('selftext')
+   
+    f = open('trans_tokens.pck1', 'wb')
+    pickle.dump(trans_tokens, f)
+    f.close()
+
+    trans_dict, trans_tfidf = trans.createBOW(trans_tokens)
     
     #frequency.decode('selftext')
     trans_tokens = trans.sentence_tokens('selftext')
