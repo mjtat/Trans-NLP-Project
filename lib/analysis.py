@@ -6,17 +6,35 @@ Created on Tue Apr 18 11:30:40 2017
 @author: michelle
 """
 
+import matplotlib.pyplot as plt
+%matplotlib inline
+import seaborn as sns
 import pandas as pd
 import nltk
 import string
 import matplotlib.pyplot as plt
 import pickle
+import re
+import numpy as np
+from tabulate import tabulate
+
+from sklearn import svm
+from sklearn import linear_model
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.cross_validation import cross_val_score
+from sklearn.cross_validation import StratifiedShuffleSplit
+from textblob import TextBlob
+from fuzzywuzzy import fuzz, process
 from nltk.corpus import stopwords
 from nltk import FreqDist
 from nltk import word_tokenize
 from nltk.tokenize import RegexpTokenizer
 from nltk.tokenize import TreebankWordTokenizer
 from nltk.tokenize import sent_tokenize
+from nltk.collocations import BigramAssocMeasures, BigramCollocationFinder, TrigramAssocMeasures, TrigramCollocationFinder
 from string import punctuation
 from gensim.models import Word2Vec, Phrases
 from gensim import corpora, models
@@ -31,7 +49,7 @@ class TextAnalysis(object):
         dataframe = self.dataframe
         dataframe[column_title] = dataframe[column_title].astype(str)
         dataframe[column_title] = dataframe[column_title].str.lower()
-        dataframe[column_title] = dataframe[column_title].str.decode('UTF-8', errors='ignore')
+        dataframe[column_title] = dataframe[column_title].str.decode('UTF-8', errors='strict')
         return dataframe
     
     # Takes an additional list of stop words to remove.    
@@ -46,30 +64,43 @@ class TextAnalysis(object):
             
         return stop_words
     
-    def wordTokens(self, df_column, words = None):
+    def wordTokens(self, df_column, words = None, pos = False, encode = True):
         
         df = self.dataframe
         df = self.decode(df_column)
         corpus = df[df_column].tolist()
 
+        
         cleaned_corpus = []
                
         stopwords = self.defineStopwords()
         
         for post in corpus:
             temp = post.lower()
-            temp = post.encode('ascii', 'ignore')
+            if encode == True:
+                temp = post.encode('ascii', 'ignore')
+            else:
+                continue
+            
+            print temp
             temp = temp.translate(None, string.punctuation)
             tokenizer = RegexpTokenizer(r'\w+')
             temp = tokenizer.tokenize(temp)
             stopped_tokens = [i for i in temp if not i in stopwords]
+            
+            if pos == True:
+                temp = nltk.pos_tag(temp)
+            
+            
             lemmatized_tokens = [nltk.WordNetLemmatizer().lemmatize(i) for i in stopped_tokens]
             cleaned_corpus.append(lemmatized_tokens)
             
         print '\n Successfully cleaned and tokenized abstracts.'
             
         return cleaned_corpus
-    
+            
+        
+        
     def sentenceTokens(self, df_column):
         df = self.dataframe
         df = self.decode(df_column)
@@ -81,7 +112,9 @@ class TextAnalysis(object):
         for post in corpus:
             temp = post.lower()
             temp = post.encode('ascii', 'ignore')
-            temp = sent_tokenize(temp) # I am happy, I am sad 
+            print temp
+            #temp = str(TextBlob(temp).correct())
+            temp = sent_tokenize(temp)             
             cleaned_corpus.append(temp)
         
         for sentence_list in cleaned_corpus:
@@ -98,43 +131,133 @@ class TextAnalysis(object):
         corpus_tfidf = tfidf[BOW]
         return dictionary, corpus_tfidf
     
+   
+    def freqPlot(self, df):
+        df = pd.DataFrame({'words': words, 'frequency': freq}) 
+        fig, ax = plt.subplots()
+        df.iloc[:,0:2].plot(kind = 'barh', figsize=(24,24), ax=ax, width = .8, fontsize = 20)
+        ax.set_title("Word Pair Frequency", fontsize = 24)
+        ax.set_yticklabels(df['words'])
+        ax.set_xlabel("Frequency",fontsize = 24)
+        ax.set_ylabel("Word Pairs", fontsize = 24)
+        fig.tight_layout()
+        plt.savefig('barplot_2.png', dpi = 300)
+        
+class MeanEmbeddingVectorizer(object):
+    def __init__(self, word2vec):
+        self.word2vec = word2vec
+        # if a text is empty we should return a vector of zeros
+        # with the same dimensionality as all the other vectors
+        self.dim = len(word2vec.itervalues().next())
+
+    def fit(self, X, y):
+        return self
+
+    def transform(self, X):
+        return np.array([
+            np.mean([self.word2vec[w] for w in words if w in self.word2vec]
+                    or [np.zeros(self.dim)], axis=0)
+            for words in X
+        ])
+
 
 if __name__ == '__main__':
+    
+
     import os
     # Set working directory.
     os.chdir('/home/michelle/Documents/Blogs/Trans NLP/data')
     
-    ask = pd.read_csv('allask.csv')      
-    cats = pd.read_csv('cats.csv')
-
-    trans = TextAnalysis(ask)
-    cats = TextAnalysis(cats)
-
-    trans_tokens = trans.wordTokens('selftext')
+    ## Determine relevant features for suicidality, using word2vec
+    ask = pd.read_csv('allask.csv')  
+    
+    # Create an analysis object.
+    trans_analysis = TextAnalysis(ask)
+    
+    # Tokenize sentences to do word2vec.
+    trans_sents = trans_analysis.sentenceTokens('selftext')
+    
+    # Complete word2vec.
+    sents = Word2Vec(trans_sents, size=200, window=10, min_count=10, workers=4, sg = 1)
+    # Get the top 50 most associated features in the data.
+    sents.most_similar(positive = ['suicide', 'suicidal'], topn=50)
+    
+    
+ #################################################################################
+ # From word associations, do some string searching to derive relevant posts for #
+ # suicidality.                                                                  #
+ #################################################################################
    
-    f = open('trans_tokens.pck1', 'wb')
-    pickle.dump(trans_tokens, f)
-    f.close()
+     # Do string matching to find relevant keywords. 
+     # Use regex symbol | to specify "or"
+    ask_suicide = ask[ask['selftext'].str.contains("depress|suic|kill self|self-harm|commit|dysphor|lonli|ideat|spiral|despair|pani|suffer", na = False)]
+    ask_suicide = ask_suicide.reset_index(level=0)
+   
+    # Set "at risk" posts as the label 1.
+    ask_suicide['risk'] = 1
     
-    count = 0
-    for post in trans_tokens:
-        if 'gender' and 'dysophoria' and 'therapist' in post:
-            count += 1
-        else:
-            count += 0
-    count = float(count)
-    count
+    # Find all other posts not matching keywords. Set those posts with label 0.
+    ask_other = ask[~ask['selftext'].str.contains("depress|suic|kill self|self-harm|commit|dysphor|lonli|ideat|spiral|despair|pani|suffer", na = False)]
+    ask_other = ask_other.reset_index(level=0)
+    ask_other = ask_other.sample(len(ask_suicide))
+    ask_other['risk'] = 0
     
-    trans_dict, trans_tfidf = trans.createBOW(trans_tokens)
-    lsi = models.LsiModel(trans_tfidf, id2word=trans_dict, num_topics=10)
-    corpus_lsi = lsi[trans_tfidf]    
-    #frequency.decode('selftext')
-    trans_tokens = trans.sentence_tokens('selftext')
-    cat_tokens = cats.sentence_tokens('selftext')
+    # Concatenate two dataframes together, generate test and training sets.
+    frames = [ask_suicide, ask_other]
+    data = pd.concat(frames)
+    data = data.reset_index(drop=True)
+    train, test = train_test_split(data, test_size = 0.2, random_state = 42)
+
+    # Generate y data.
+    y_train = train['risk'].values
+    y_test = test['risk'].values
     
-    #bigram_transformer = Phrases(trans_tokens)
-    model_trans = Word2Vec(trans_tokens, size=200, window=10, min_count=10, workers=4, sg = 1)
-    model_cats = Word2Vec(cat_tokens, size=100, window=10, min_count=5, workers=4, sg = 1)
+    # Get word tokens for later analysis in scikit
+    X_train_sents = TextAnalysis(train).sentenceTokens('selftext')
+    X_test_sents = TextAnalysis(test).sentenceTokens('selftext')
     
-    model_trans.most_similar(positive = ['anxiety'], topn=20)
-    model_cats.most_similar(positive = ['happy'], topn = 20)
+    # Train word2vec model again to get Word Embedding Vectors
+    model_train = Word2Vec(X_train_sents, size=200, window=10, min_count=10, workers=4, sg = 1)
+    model_test = Word2Vec(X_test_sents, size=200, window=10, min_count=10, workers=4, sg = 1)
+    
+    # Average word vectors
+    w2v_train = dict(zip(model_train.wv.index2word, model_train.wv.syn0))
+    w2v_test = dict(zip(model_test.wv.index2word, model_test.wv.syn0))
+    
+    # Get word tokens for later scikit modeling.
+    train, test = train_test_split(data, test_size = 0.2, random_state = 42)
+    trans_tokens_train = TextAnalysis(train).wordTokens('selftext', encode = True)
+    trans_tokens_test = TextAnalysis(test).wordTokens('selftext')
+
+    # Create a scikit pipeline for modeling
+    
+    w2v_rf = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)), 
+                        ("Random Forest", RandomForestClassifier(n_estimators=500, criterion='gini'))])
+                
+    logistic = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)), 
+                        ("Logistic Reg", linear_model.LogisticRegression())])
+    
+    svc = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)),
+                   ("linear svc", svm.SVC(kernel="linear"))]) 
+    gradient = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)),
+                   ("gradient boost", GradientBoostingClassifier(n_estimators = 500, learning_rate=1.0))]) 
+
+    
+
+
+    all_models = [("random forest", w2v_rf),("logistic regression", logistic), ("linear svc", svc), ("gradient boosted trees", gradient)]
+    
+    scores = sorted([(name, cross_val_score(model, trans_tokens_train, y_train, cv=5).mean()) 
+                     for name, model in all_models], 
+                    key=lambda (_, x): -x)
+    
+    print "\n" + tabulate(scores, floatfmt=".4f", headers=("model", 'score'))
+    
+    
+    plt.figure(figsize=(15, 8), dpi = 300)
+    sns.set(font_scale=2)
+    ax = sns.barplot(x=[name for name, _ in scores], y=[score for _, score in scores])
+    ax.set_title("Model Classification Accuracy (KFold = 5)", fontsize = 24)
+    ax.set_xlabel('Classification Model Name', fontsize = 24)
+    ax.set_ylabel('Accuracy (Proportion Correct)', fontsize = 24)
+    plt.ylim(.5,1)
