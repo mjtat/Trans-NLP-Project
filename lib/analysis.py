@@ -13,28 +13,24 @@ import pandas as pd
 import nltk
 import string
 import matplotlib.pyplot as plt
-import pickle
-import re
 import numpy as np
 from tabulate import tabulate
-
+from sklearn.pipeline import make_pipeline
 from sklearn import svm
 from sklearn import linear_model
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.linear_model import SGDClassifier
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.cross_validation import cross_val_score
 from sklearn.cross_validation import StratifiedShuffleSplit
-from textblob import TextBlob
-from fuzzywuzzy import fuzz, process
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, TfidfTransformer
 from nltk.corpus import stopwords
 from nltk import FreqDist
 from nltk import word_tokenize
 from nltk.tokenize import RegexpTokenizer
-from nltk.tokenize import TreebankWordTokenizer
 from nltk.tokenize import sent_tokenize
-from nltk.collocations import BigramAssocMeasures, BigramCollocationFinder, TrigramAssocMeasures, TrigramCollocationFinder
 from string import punctuation
 from gensim.models import Word2Vec, Phrases
 from gensim import corpora, models
@@ -78,6 +74,7 @@ class TextAnalysis(object):
         for post in corpus:
             temp = post.lower()
             if encode == True:
+                temp = post.decode('ascii', 'ignore')
                 temp = post.encode('ascii', 'ignore')
             else:
                 continue
@@ -159,11 +156,22 @@ class MeanEmbeddingVectorizer(object):
                     or [np.zeros(self.dim)], axis=0)
             for words in X
         ])
+            
 
+class DenseTransformer(object):
 
+    def transform(self, X, y=None, **fit_params):
+        return X.todense()
+
+    def fit_transform(self, X, y=None, **fit_params):
+        self.fit(X, y, **fit_params)
+        return self.transform(X)
+
+    def fit(self, X, y=None, **fit_params):
+        return self
+            
 if __name__ == '__main__':
     
-
     import os
     # Set working directory.
     os.chdir('/home/michelle/Documents/Blogs/Trans NLP/data')
@@ -178,32 +186,37 @@ if __name__ == '__main__':
     trans_sents = trans_analysis.sentenceTokens('selftext')
     
     # Complete word2vec.
-    sents = Word2Vec(trans_sents, size=200, window=10, min_count=10, workers=4, sg = 1)
+    sents = Word2Vec(trans_sents, size=200, window=5, min_count=10, workers=4, sg = 1)
     # Get the top 50 most associated features in the data.
-    sents.most_similar(positive = ['suicide', 'suicidal'], topn=50)
+    list_sim = sents.most_similar(positive = ['suicide', 'suicidal', 'empty'], negative = 'happy', topn=50)
     
     
  #################################################################################
  # From word associations, do some string searching to derive relevant posts for #
  # suicidality.                                                                  #
  #################################################################################
-   
+     word_list = []    
+     for i in list_sim:
+         word_list.append(i[0])
+ 
      # Do string matching to find relevant keywords. 
      # Use regex symbol | to specify "or"
-    ask_suicide = ask[ask['selftext'].str.contains("depress|suic|kill self|self-harm|commit|dysphor|lonli|ideat|spiral|despair|pani|suffer", na = False)]
-    ask_suicide = ask_suicide.reset_index(level=0)
+    ask_distress = ask[ask['selftext'].str.contains('|'.join(word_list), na = False)]
+    ask_distress = ask_distress[ask_distress['selftext'].str.len()>=1500]
+    ask_distress = ask_distress.reset_index(level=0)
    
     # Set "at risk" posts as the label 1.
-    ask_suicide['risk'] = 1
+    ask_distress['distressed'] = 1
     
     # Find all other posts not matching keywords. Set those posts with label 0.
-    ask_other = ask[~ask['selftext'].str.contains("depress|suic|kill self|self-harm|commit|dysphor|lonli|ideat|spiral|despair|pani|suffer", na = False)]
+    ask_other = ask[~ask['selftext'].str.contains('|'.join(word_list), na = False)]
+    ask_suicide = ask_other[ask_other['selftext'].str.len()>=1500]
     ask_other = ask_other.reset_index(level=0)
     ask_other = ask_other.sample(len(ask_suicide))
-    ask_other['risk'] = 0
+    ask_other['distressed'] = 0
     
     # Concatenate two dataframes together, generate test and training sets.
-    frames = [ask_suicide, ask_other]
+    frames = [ask_distress, ask_other]
     data = pd.concat(frames)
     data = data.reset_index(drop=True)
     train, test = train_test_split(data, test_size = 0.2, random_state = 42)
@@ -228,8 +241,32 @@ if __name__ == '__main__':
     train, test = train_test_split(data, test_size = 0.2, random_state = 42)
     trans_tokens_train = TextAnalysis(train).wordTokens('selftext', encode = True)
     trans_tokens_test = TextAnalysis(test).wordTokens('selftext')
-
-    # Create a scikit pipeline for modeling
+    
+    # Generate BoW tfidf vectors.
+    def SKBoW(tokens):
+        corpus = []
+        for doc in tokens:
+            for word in doc:
+                corpus.append(word)
+        return corpus
+    
+    tf_train = SKBoW(trans_tokens_train)
+    tf_test = SKBoW(trans_tokens_test)
+    
+    def SKtfidf(corpus, num_features):
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        vectorizer = TfidfVectorizer(analyzer='word',
+                        min_df = 0, 
+                        stop_words = None, 
+                        max_features = num_features)
+        data = vectorizer.fit_transform(corpus)
+        data = data.toarray(corpus)
+        return data
+    
+    tf_train = SKtfidf(tf_train, 200)
+    tf_test = SKtfidf(tf_test,200)    
+    
+    # Create a scikit pipeline for modeling word embeddings
     
     w2v_rf = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)), 
                         ("Random Forest", RandomForestClassifier(n_estimators=500, criterion='gini'))])
@@ -239,24 +276,63 @@ if __name__ == '__main__':
     
     svc = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)),
                    ("linear svc", svm.SVC(kernel="linear"))]) 
+    
     gradient = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)),
                    ("gradient boost", GradientBoostingClassifier(n_estimators = 500, learning_rate=1.0))]) 
+    
+    SDG = Pipeline([("word2vec vectorizer", MeanEmbeddingVectorizer(w2v_train)),
+                   ("SDG", SGDClassifier(loss="hinge", penalty="l2"))])  
+    
+    text_clf = Pipeline([('vect', CountVectorizer()),
+...                      ('tfidf', TfidfTransformer()),
+...                      ('clf', MultinomialNB()),
+... ])
+    
+
+    rf_Bow = Pipeline([('tfidf', TfidfVectorizer(analyzer=lambda x: x,max_features = 200)), ('to dense', DenseTransformer()),
+                        ("Random Forest", RandomForestClassifier(n_estimators=500, criterion='gini'))])
+                
+    logistic_BoW = Pipeline([('tfidf', TfidfVectorizer(analyzer=lambda x: x,max_features = 200)), ('to dense', DenseTransformer()), 
+                        ("Logistic Reg", linear_model.LogisticRegression())])
+    
+    svc_BoW = Pipeline([('tfidf', TfidfVectorizer(analyzer=lambda x: x,max_features = 200)), ('to dense', DenseTransformer()),
+                   ("linear svc", svm.SVC(kernel="linear"))]) 
+    
+    gradient_BoW = Pipeline([('tfidf', TfidfVectorizer(analyzer=lambda x: x,max_features = 200)), ('to dense', DenseTransformer()),
+                   ("gradient boost", GradientBoostingClassifier(n_estimators = 500, learning_rate=1.0))]) 
+    
+    SDG_BoW = Pipeline([('tfidf', TfidfVectorizer(analyzer=lambda x: x,max_features = 200)), ('to dense', DenseTransformer()),
+                   ("SDG", SGDClassifier(loss="hinge", penalty="l2"))])  
 
     
 
 
-    all_models = [("random forest", w2v_rf),("logistic regression", logistic), ("linear svc", svc), ("gradient boosted trees", gradient)]
+    all_models = [("random forest", w2v_rf),("logistic regression", logistic), ("linear svc", svc), ("gradient boosted trees", gradient), ("SDG-SVM", SDG)]
+    all_models_BoW = [("random forest", rf_Bow),("logistic regression BoW", logistic_BoW), ("linear svc BoW", svc_BoW), ("gradient boosted trees", gradient_BoW), ("SDG-SVM", SDG_BoW)]
     
     scores = sorted([(name, cross_val_score(model, trans_tokens_train, y_train, cv=5).mean()) 
                      for name, model in all_models], 
                     key=lambda (_, x): -x)
     
+    
+    scores_BoW = sorted([(name, cross_val_score(model, trans_tokens_train, y_train, cv=5).mean()) 
+                     for name, model in all_models_BoW], 
+                    key=lambda (_, x): -x)
+    
     print "\n" + tabulate(scores, floatfmt=".4f", headers=("model", 'score'))
+    print "\n" + tabulate(scores_BoW, floatfmt=".4f", headers=("model", 'score'))
     
-    
-    plt.figure(figsize=(15, 8), dpi = 300)
+    plt.figure(figsize=(15, 8), dpi = 150)
     sns.set(font_scale=2)
     ax = sns.barplot(x=[name for name, _ in scores], y=[score for _, score in scores])
+    ax.set_title("Model Classification Accuracy (KFold = 5)", fontsize = 24)
+    ax.set_xlabel('Classification Model Name', fontsize = 24)
+    ax.set_ylabel('Accuracy (Proportion Correct)', fontsize = 24)
+    plt.ylim(.5,1)
+    
+    plt.figure(figsize=(17, 8), dpi = 150)
+    sns.set(font_scale=2)
+    ax = sns.barplot(x=[name for name, _ in scores_BoW], y=[score for _, score in scores_BoW])
     ax.set_title("Model Classification Accuracy (KFold = 5)", fontsize = 24)
     ax.set_xlabel('Classification Model Name', fontsize = 24)
     ax.set_ylabel('Accuracy (Proportion Correct)', fontsize = 24)
